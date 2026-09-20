@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>VersionVault — Release Investigator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">LOCAL-FIRST PROJECT FORENSICS</div>
+    <h1>VersionVault</h1>
+    <p>Compare project packages, find what changed, and verify what you're actually releasing.</p>
+  </div>
+  <button id="themeBtn" class="iconBtn" aria-label="Toggle theme">☼</button>
+</header>
+<main>
+  <section class="hero card">
+    <div>
+      <h2>What changed between versions?</h2>
+      <p>Drop two ZIP files below. Analysis runs in your browser; files are not uploaded by this app.</p>
+    </div>
+    <div class="privacy"><span>●</span> Local analysis</div>
+  </section>
+  <section class="inputs">
+    <label class="drop card">
+      <span class="step">1</span>
+      <strong>OLD VERSION</strong>
+      <span id="oldName" class="filename">Choose a ZIP file</span>
+      <input id="oldFile" type="file" accept=".zip,application/zip">
+      <span class="choose">Choose old ZIP</span>
+    </label>
+    <label class="drop card">
+      <span class="step">2</span>
+      <strong>NEW VERSION</strong>
+      <span id="newName" class="filename">Choose a ZIP file</span>
+      <input id="newFile" type="file" accept=".zip,application/zip">
+      <span class="choose">Choose new ZIP</span>
+    </label>
+  </section>
+  <button id="analyzeBtn" class="primary" disabled>Analyze versions</button>
+  <div id="status" class="status" role="status"></div>
+  <section id="results" hidden>
+    <div id="summary"></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="diff">File changes</button>
+      <button class="tab" data-tab="security">Security</button>
+      <button class="tab" data-tab="metadata">Metadata</button>
+      <button class="tab" data-tab="report">Report</button>
+    </div>
+    <div id="tab-overview" class="tabpane"></div>
+    <div id="tab-diff" class="tabpane" hidden></div>
+    <div id="tab-security" class="tabpane" hidden></div>
+    <div id="tab-metadata" class="tabpane" hidden></div>
+    <div id="tab-report" class="tabpane" hidden></div>
+  </section>
+</main>
+<footer>
+  <span>VersionVault MVP 1.0</span>
+  <span>Browser-only • No account • No server required</span>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
