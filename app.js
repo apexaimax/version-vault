@@ -69,7 +69,10 @@ async function parseZip(file){
     if(diskStart!==0xffff&&diskStart!==0)throw new Error("Multi-disk ZIP entries are not supported.");
     if(p+46+nl+xl+cl>cdOff+cdSize)throw new Error("ZIP central directory entry is truncated.");
     const name=new TextDecoder().decode(a.slice(p+46,p+46+nl)),extra=a.slice(p+46+nl,p+46+nl+xl);
+    const needsZip64=comp32===0xffffffff||uncomp32===0xffffffff||local32===0xffffffff||diskStart===0xffff;
     const z=zip64Values(extra,comp32===0xffffffff,uncomp32===0xffffffff,local32===0xffffffff,diskStart===0xffff);
+    if(needsZip64&&!z)throw new Error("ZIP64 extended information field is missing: "+name);
+    if(z?.disk!==null&&z?.disk!==undefined&&z.disk!==0)throw new Error("Multi-disk ZIP64 entries are not supported.");
     const comp=z?.comp!==null&&z?.comp!==undefined?toSafeNumber(z.comp,"Compressed entry size"):comp32;
     const uncomp=z?.uncomp!==null&&z?.uncomp!==undefined?toSafeNumber(z.uncomp,"Uncompressed entry size"):uncomp32;
     const local=z?.offset!==null&&z?.offset!==undefined?toSafeNumber(z.offset,"Local entry offset"):local32;
