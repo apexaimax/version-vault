@@ -6,10 +6,10 @@ const fixtureB64 = (await readFile(new URL("./fixtures/zip64-fixture.zip.b64", i
 const fixture = Buffer.from(fixtureB64, "base64");
 const sig = o => fixture.readUInt32LE(o).toString(16);
 assert.equal(sig(0), "4034b50");
-assert.equal(sig(91), "2014b50");
-assert.equal(sig(174), "64b50");
-assert.equal(sig(226), "764b50");
-assert.equal(sig(246), "6054b50");
+assert.equal(sig(67), "2014b50");
+assert.equal(sig(158), "64b50");
+assert.equal(sig(214), "764b50");
+assert.equal(sig(234), "6054b50");
 assert.equal(fixture.length, 256);
 assert.match(fixtureB64, /^UEs/);
 assert.match(app, /function crc32/);
