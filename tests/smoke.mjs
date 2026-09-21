@@ -2,6 +2,16 @@ import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 
 const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
+const fixtureB64 = (await readFile(new URL("./fixtures/zip64-fixture.zip.b64", import.meta.url), "utf8")).trim();
+const fixture = Buffer.from(fixtureB64, "base64");
+const sig = o => fixture.readUInt32LE(o).toString(16);
+assert.equal(sig(0), "4034b50");
+assert.equal(sig(91), "2014b50");
+assert.equal(sig(174), "64b50");
+assert.equal(sig(226), "764b50");
+assert.equal(sig(246), "6054b50");
+assert.equal(fixture.length, 256);
+assert.match(fixtureB64, /^UEs/);
 assert.match(app, /function crc32/);
 assert.match(app, /ZIP64 end-of-central-directory record/);
 assert.match(app, /ZIP64 locator/);
