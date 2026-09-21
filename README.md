@@ -1,5 +1,7 @@
 # VersionVault
 
+**Current release: 1.1 hardening build**
+
 VersionVault is a browser-only MVP for investigating changes between two project ZIP packages.
 
 ## What it does
@@ -11,6 +13,9 @@ VersionVault is a browser-only MVP for investigating changes between two project
 - Flags sensitive-looking filenames and executable binaries.
 - Inspects Chrome extension `manifest.json` permissions.
 - Inspects `package.json` name/version/dependency counts.
+- Shows old/new SHA-256 hashes for changed files.
+- Validates supported ZIP entry sizes and CRC-32 checksums.
+- Detects duplicate filenames and explicitly identifies unsupported ZIP compression.
 - Exports a plain-text release verification report.
 
 ## Privacy
@@ -19,7 +24,7 @@ The application contains no server endpoint and no analytics code. ZIP contents 
 
 ## Browser note
 
-The MVP uses the browser's `DecompressionStream` API for deflated ZIP entries. Very old browsers or unusual ZIP compression methods may not be supported.
+The MVP uses the browser's `DecompressionStream` API for deflated ZIP entries. Very old browsers or unusual ZIP compression methods may not be supported. ZIP64 archives are explicitly rejected rather than partially interpreted.
 
 ## What it does NOT prove
 
