@@ -24,7 +24,7 @@ The application contains no server endpoint and no analytics code. ZIP contents 
 
 ## Browser note
 
-The MVP uses the browser's `DecompressionStream` API for deflated ZIP entries. Very old browsers or unusual ZIP compression methods may not be supported. ZIP64 archives are explicitly rejected rather than partially interpreted.
+The MVP uses the browser's `DecompressionStream` API for deflated ZIP entries. Very old browsers or unusual ZIP compression methods may not be supported. Bounded ZIP64 support reads the ZIP64 end records/locator and ZIP64 extended entry sizes; multi-disk archives and entries beyond browser safety limits are rejected.
 
 ## What it does NOT prove
 
