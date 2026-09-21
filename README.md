@@ -1,6 +1,6 @@
 # VersionVault
 
-**Current release: 1.1 hardening build**
+**Current release: 1.2 ZIP64 hardening build**
 
 VersionVault is a browser-only MVP for investigating changes between two project ZIP packages.
 
