@@ -90,6 +90,11 @@ async function parseZip(file){
   if(p!==cdOff+cdSize)throw new Error("ZIP central directory size does not match its entries.");
   files.duplicates=duplicates;return files
 }
+// Kept out of production behavior: the Node regression suite supplies this
+// object before loading the app so it can exercise the same ZIP parser users run.
+if(typeof globalThis!=="undefined"&&globalThis.__VERSIONVAULT_TEST_HOOKS__){
+  globalThis.__VERSIONVAULT_TEST_HOOKS__.parseZip=parseZip;
+}
 function textOf(entry){if(!entry?.data||entry.data.length>2e6)return null;try{return new TextDecoder("utf-8",{fatal:false}).decode(entry.data)}catch{return null}}
 function isText(name){return /\.(txt|md|json|js|mjs|cjs|ts|tsx|jsx|css|html|htm|xml|yml|yaml|env|toml|ini|conf|config|sh|py|rb|go|rs|java|kt|swift)$/i.test(name)}
 function scanSecurity(files){const findings=[],secretPatterns=[[/^\s*(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|API_KEY|SECRET_KEY|PRIVATE_KEY|PASSWORD|TOKEN)\s*=\s*["']?[^"'\\s]{8,}/im,"Credential-like assignment"],[/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,"GitHub token-like string"],[/\bsk-[A-Za-z0-9_-]{20,}\b/,"OpenAI-key-like string"],[/-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,"Private key block"]];for(const [name,e] of files){if(/(^|\/)\.env(\.|$)|(^|\/)(id_rsa|credentials|secrets?)(\.|$)/i.test(name))findings.push({level:"review",file:name,msg:"Sensitive-looking filename"});if(/\.(exe|dll|dylib|so|bin|app)$/i.test(name))findings.push({level:"review",file:name,msg:"Executable/binary file"});if(e.unsupported)findings.push({level:"review",file:name,msg:"Compression method not supported by this browser build"});if(isText(name)){const t=textOf(e);if(t){for(const pat of secretPatterns){const re=pat instanceof RegExp?pat:pat[0];const msg=pat instanceof RegExp?"Secret-like string":pat[1];if(re.test(t)){findings.push({level:"block",file:name,msg});break}}}}}const manifest=files.get("manifest.json")||[...files.values()].find(e=>/\/manifest\.json$/i.test(e.name));if(manifest){try{const m=JSON.parse(textOf(manifest)||"{}");for(const k of ["permissions","host_permissions","optional_permissions"]){if(Array.isArray(m[k])&&m[k].length)findings.push({level:"review",file:manifest.name,msg:`${k}: ${m[k].join(", ")}`})}}catch{findings.push({level:"review",file:manifest.name,msg:"Manifest JSON could not be parsed"})}}return findings}
