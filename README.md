@@ -45,7 +45,7 @@ VersionVault supports the ZIP64 structures needed for safe bounded inspection:
 - Stored and deflated ZIP entries
 - CRC-32 integrity validation after extraction
 
-It intentionally rejects multi-disk ZIPs and archives or entries beyond its browser safety limits. This is bounded ZIP64 support: compatibility for modern ZIP metadata without pretending to be a universal archive engine.
+It intentionally rejects multi-disk ZIPs and archives or entries beyond its browser safety limits, including a 512 MiB combined uncompressed-content budget. Deflated content is read through a bounded stream, so actual expansion cannot exceed the entry's declared size or the remaining archive budget. This is bounded ZIP64 support: compatibility for modern ZIP metadata without pretending to be a universal archive engine.
 
 ## Verification
 
