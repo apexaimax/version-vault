@@ -22,3 +22,5 @@ jobs:
         run: node --check app.js
       - name: Run smoke checks
         run: node tests/smoke.mjs
+      - name: Verify action pins
+        run: node tests/actions-pinned.mjs
