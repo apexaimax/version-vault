@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
+import { deflateRawSync } from "node:zlib";
 import vm from "node:vm";
 
 const app = await readFile(new URL("../app.js", import.meta.url), "utf8");
@@ -55,6 +56,7 @@ const context={
 };
 vm.runInNewContext(app,context,{timeout:1000});
 assert.equal(typeof hooks.parseZip,"function","ZIP parser test hook was not installed");
+assert.equal(typeof hooks.inflateRaw,"function","bounded ZIP inflater test hook was not installed");
 const fileFrom=bytes=>({
   size:bytes.byteLength,
   async arrayBuffer(){return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)}
@@ -63,6 +65,13 @@ const parsed=await hooks.parseZip(fileFrom(fixture));
 assert.equal(parsed.size,1,"ZIP64 fixture did not parse to exactly one file");
 assert.equal(new TextDecoder().decode(parsed.get("zip64-fixture.txt")?.data),"VersionVault ZIP64 fixture\n");
 assert.ok([...parsed.values()].every(entry=>entry.sha&&entry.crc32),"ZIP64 entries were not integrity-checked");
+
+const expandedPayload=Buffer.alloc(1024*1024,65);
+await assert.rejects(
+  hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
+  /exceeded.*limit|beyond.*limit/i,
+  "Inflater must stop when output exceeds its caller-provided bound"
+);
 
 const corrupted=Buffer.from(fixture);
 const localNameLength=corrupted.readUInt16LE(26);

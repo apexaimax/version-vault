@@ -18,11 +18,31 @@ async function sha256(buf){const h=await crypto.subtle.digest("SHA-256",buf);ret
 function u16(a,o){return a[o]|a[o+1]<<8}
 function u32(a,o){return (a[o]|a[o+1]<<8|a[o+2]<<16|a[o+3]<<24)>>>0}
 function crc32(buf){let c=~0;for(const b of buf){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0)}return (~c)>>>0}
-async function inflateRaw(buf){if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");const ds=new DecompressionStream("deflate-raw");const stream=new Blob([buf]).stream().pipeThrough(ds);return new Uint8Array(await new Response(stream).arrayBuffer())}
 const MAX_ARCHIVE_BYTES=1024*1024*1024;
 const MAX_ENTRY_COMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRY_UNCOMPRESSED_BYTES=512*1024*1024;
+const MAX_TOTAL_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRIES=100000;
+async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
+  if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");
+  const ds=new DecompressionStream("deflate-raw");
+  const reader=new Blob([buf]).stream().pipeThrough(ds).getReader();
+  const chunks=[];let total=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      if(total+value.byteLength>maxBytes){
+        await reader.cancel().catch(()=>{});
+        throw new Error("ZIP entry expanded beyond its declared or permitted limit.");
+      }
+      chunks.push(value);total+=value.byteLength;
+    }
+  }finally{reader.releaseLock()}
+  const output=new Uint8Array(total);let offset=0;
+  for(const chunk of chunks){output.set(chunk,offset);offset+=chunk.byteLength}
+  return output
+}
 function u64(a,o){const lo=BigInt(u32(a,o)),hi=BigInt(u32(a,o+4));return lo|(hi<<32n)}
 function toSafeNumber(n,label){if(n>BigInt(Number.MAX_SAFE_INTEGER))throw new Error(label+" exceeds browser-safe integer limits.");return Number(n)}
 function findExtra(a,start,len,id){let p=start,end=start+len;while(p+4<=end){const tag=u16(a,p),size=u16(a,p+2);p+=4;if(p+size>end)break;if(tag===id)return a.slice(p,p+size);p+=size}return null}
@@ -62,7 +82,7 @@ async function parseZip(file){
   }
   if(entries>MAX_ENTRIES)throw new Error("Archive contains more than 100,000 entries, above the browser safety limit.");
   if(cdOff+cdSize>a.length)throw new Error("ZIP central directory is outside the archive.");
-  const files=new Map(),duplicates=[];let p=cdOff;
+  const files=new Map(),duplicates=[];let p=cdOff,totalUncompressed=0;
   for(let index=0;index<entries;index++){
     if(p+46>cdOff+cdSize||u32(a,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
     const diskStart=u16(a,p+34),crc=u32(a,p+16),method=u16(a,p+10),comp32=u32(a,p+20),uncomp32=u32(a,p+24),nl=u16(a,p+28),xl=u16(a,p+30),cl=u16(a,p+32),local32=u32(a,p+42);
@@ -76,13 +96,13 @@ async function parseZip(file){
     const comp=z?.comp!==null&&z?.comp!==undefined?toSafeNumber(z.comp,"Compressed entry size"):comp32;
     const uncomp=z?.uncomp!==null&&z?.uncomp!==undefined?toSafeNumber(z.uncomp,"Uncompressed entry size"):uncomp32;
     const local=z?.offset!==null&&z?.offset!==undefined?toSafeNumber(z.offset,"Local entry offset"):local32;
-    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the 512 MiB browser safety limit: "+name);
+    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the 512 MiB browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
     p+=46+nl+xl+cl;if(name.endsWith("/"))continue;if(files.has(name))duplicates.push(name);
     if(local+30>a.length||u32(a,local)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
     const lnl=u16(a,local+26),lxl=u16(a,local+28),start=local+30+lnl+lxl;
     if(start+comp>a.length)throw new Error("ZIP entry extends beyond the archive.");
     const compressed=a.slice(start,start+comp);let data;
-    if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
+    if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
     if(data.length!==uncomp)throw new Error("ZIP entry size check failed: "+name);
     if(crc32(data)!==crc)throw new Error("ZIP CRC check failed: "+name);
     files.set(name,{name,size:data.length,method,data,sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
@@ -94,6 +114,7 @@ async function parseZip(file){
 // object before loading the app so it can exercise the same ZIP parser users run.
 if(typeof globalThis!=="undefined"&&globalThis.__VERSIONVAULT_TEST_HOOKS__){
   globalThis.__VERSIONVAULT_TEST_HOOKS__.parseZip=parseZip;
+  globalThis.__VERSIONVAULT_TEST_HOOKS__.inflateRaw=inflateRaw;
 }
 function textOf(entry){if(!entry?.data||entry.data.length>2e6)return null;try{return new TextDecoder("utf-8",{fatal:false}).decode(entry.data)}catch{return null}}
 function isText(name){return /\.(txt|md|json|js|mjs|cjs|ts|tsx|jsx|css|html|htm|xml|yml|yaml|env|toml|ini|conf|config|sh|py|rb|go|rs|java|kt|swift)$/i.test(name)}
