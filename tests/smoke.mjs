@@ -250,4 +250,19 @@ for(const mutate of [
     "Mutated ZIP structural fields must be rejected");
 }
 
+
+// Binary entries must remain hashable without retaining their decompressed payload.
+const binaryFixture=Buffer.from(fixture);
+const oldName=Buffer.from("zip64-fixture.txt"),newName=Buffer.from("zip64-fixture.bin");
+let replaced=0;
+for(let at=0;(at=binaryFixture.indexOf(oldName,at))>=0;at+=newName.length){
+  newName.copy(binaryFixture,at);replaced++;
+}
+assert.equal(replaced,2,"ZIP64 fixture must have local and central filenames");
+const binaryParsed=await hooks.parseZip(fileFrom(binaryFixture));
+const binaryEntry=binaryParsed.get("zip64-fixture.bin");
+assert.ok(binaryEntry?.sha&&binaryEntry?.crc32,"Binary entries must retain integrity metadata");
+assert.equal(binaryEntry.data,undefined,"Binary entries must not retain payload buffers");
+assert.equal(binaryEntry.sha,parsed.get("zip64-fixture.txt").sha,"Binary and text names must hash the same bytes");
+
 console.log("VersionVault smoke checks passed.");
