@@ -4,7 +4,7 @@
 
 Compare two project ZIPs before you share, publish, or archive them—without uploading your source code.
 
-VersionVault is a private, browser-only release review tool. It identifies file-level changes between an older and newer ZIP, verifies supported entries, and highlights common packaging risks directly in your browser tab.
+VersionVault is a privacy-preserving, browser-only release review tool. It identifies file-level changes between an older and newer ZIP, verifies supported entries, and highlights common packaging risks directly in your browser tab.
 
 ## Why use it?
 
@@ -61,6 +61,25 @@ Run the test with:
 ```bash
 node tests/smoke.mjs
 ```
+
+## Try the demo
+
+Open the app and choose **Try a sample comparison**. Two synthetic ZIPs are generated locally to demonstrate added, removed, and changed files. No upload, account, or external service is needed.
+
+## Read the results
+
+Start with the overview counts for added, removed, changed, and unchanged files. Open **File changes** to inspect specific paths, then **Security** to review any flagged filenames, credential-like patterns, or extension permissions. A warning is a prompt for manual review, not proof of compromise; no warning is not proof that a release is safe. Use **Report** to save the findings before sharing a release.
+
+## Browser acceptance checks before merging the demo
+
+- Open the draft branch in a modern desktop browser and on an iPad-sized screen.
+- Select **Try a sample comparison** and confirm that the generated ZIPs produce the expected added, removed, and changed entries.
+- Confirm all result tabs work, the summary matches the file details, and the report can be downloaded.
+- Compare two user-selected synthetic ZIPs to confirm the normal workflow remains intact.
+- Confirm keyboard navigation, readable narrow-screen layout, and no unexpected network requests while analyzing.
+- Run `node tests/smoke.mjs` and confirm the pull request's GitHub Actions checks pass.
+
+These are release gates, not claims that the checks have already passed.
 
 ## Run
 
