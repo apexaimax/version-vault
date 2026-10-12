@@ -84,7 +84,7 @@ async function parseZip(file){
     cdOff=toSafeNumber(u64(recordHeader,48),"ZIP64 central directory offset");
   }
   if(entries>MAX_ENTRIES)throw new Error("Archive contains more than 100,000 entries, above the browser safety limit.");
-  if(directory.length>file.size)throw new Error("ZIP central directory is outside the archive.");
+  if(cdOff>file.size||cdSize>file.size-cdOff)throw new Error("ZIP central directory is outside the archive.");
   const directory=await read(cdOff,cdSize);
   const files=new Map(),duplicates=[];let p=0,totalUncompressed=0;
   for(let index=0;index<entries;index++){
