@@ -230,4 +230,24 @@ for(const limit of [0,1,32,1024,65536]){
     /beyond.*limit/i,"Inflation must reject output above "+limit+" bytes");
 }
 
+
+// Additional adversarial regression matrix: malformed signatures and truncated archives.
+for(const cut of [0,1,4,16,21,22,32,64]){
+  const truncated=fixture.subarray(0,Math.min(cut,fixture.length));
+  await assert.rejects(hooks.parseZip(fileFrom(truncated)),
+    /ZIP|readable|bounds|malformed|truncated|missing|outside/i,
+    "Truncated ZIP prefix of "+cut+" bytes must fail safely");
+}
+for(const mutate of [
+  bytes=>bytes.fill(0,0,4),
+  bytes=>bytes.fill(0,bytes.length-22,bytes.length),
+  bytes=>bytes.writeUInt16LE(1,bytes.lastIndexOf(Buffer.from("504b0506","hex"))+6),
+  bytes=>bytes.writeUInt32LE(0xffffffff,bytes.lastIndexOf(Buffer.from("504b0607","hex"))+4)
+]){
+  const malformed=Buffer.from(fixture);mutate(malformed);
+  await assert.rejects(hooks.parseZip(fileFrom(malformed)),
+    /ZIP|Multi-disk|malformed|missing|outside|readable/i,
+    "Mutated ZIP structural fields must be rejected");
+}
+
 console.log("VersionVault smoke checks passed.");
