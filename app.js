@@ -127,6 +127,7 @@ async function parseZip(file){
 if(typeof globalThis!=="undefined"&&globalThis.__VERSIONVAULT_TEST_HOOKS__){
   globalThis.__VERSIONVAULT_TEST_HOOKS__.parseZip=parseZip;
   globalThis.__VERSIONVAULT_TEST_HOOKS__.inflateRaw=inflateRaw;
+  globalThis.__VERSIONVAULT_TEST_HOOKS__.scanSecurity=scanSecurity;
 }
 function textOf(entry){if(!entry?.data||entry.data.length>2e6)return null;try{return new TextDecoder("utf-8",{fatal:false}).decode(entry.data)}catch{return null}}
 function isText(name){return /\.(txt|md|json|js|mjs|cjs|ts|tsx|jsx|css|html|htm|xml|yml|yaml|env|toml|ini|conf|config|sh|py|rb|go|rs|java|kt|swift)$/i.test(name)}
