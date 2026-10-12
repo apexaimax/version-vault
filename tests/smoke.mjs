@@ -66,6 +66,17 @@ assert.equal(parsed.size,1,"ZIP64 fixture did not parse to exactly one file");
 assert.equal(new TextDecoder().decode(parsed.get("zip64-fixture.txt")?.data),"VersionVault ZIP64 fixture\n");
 assert.ok([...parsed.values()].every(entry=>entry.sha&&entry.crc32),"ZIP64 entries were not integrity-checked");
 
+// Regression: central-directory and local-header filenames must agree.
+const mismatchedName=Buffer.from(fixture);
+const localNameLengthForMismatch=mismatchedName.readUInt16LE(26);
+assert.ok(localNameLengthForMismatch>0,"Fixture needs a local filename");
+mismatchedName[30]^=0x01;
+await assert.rejects(
+  hooks.parseZip(fileFrom(mismatchedName)),
+  /ZIP local filename mismatch/i,
+  "Conflicting ZIP filenames must be rejected"
+);
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
