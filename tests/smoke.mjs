@@ -46,6 +46,8 @@ assert.match(app,/if\(retainText\)retainedTextBytes\+=data\.length/);
 
 assert.match(app,/MAX_ENTRY_UNCOMPRESSED_BYTES=64\*1024\*1024/);
 assert.match(app,/Text content was not retained for security scanning/);
+assert.match(app,/output\.set\(value,total\)/);
+assert.match(app,/return total===maxBytes\?output:output\.slice\(0,total\)/);
 const element=()=>({
   addEventListener(){},
   classList:{toggle(){}},
