@@ -39,6 +39,11 @@ assert.match(app,/catch\(e\)\{state\.result=null;\$\("#results"\)\.hidden=true/)
 // Bounded archive reads must not regress to reading the complete File.
 assert.doesNotMatch(app,/file\.arrayBuffer\(\)/);
 
+// Retained text has a cumulative budget in addition to the per-file preview cap.
+assert.match(app,/MAX_RETAINED_TEXT_BYTES=16\*1024\*1024/);
+assert.match(app,/data\.length<=MAX_RETAINED_TEXT_BYTES-retainedTextBytes/);
+assert.match(app,/if\(retainText\)retainedTextBytes\+=data\.length/);
+
 const element=()=>({
   addEventListener(){},
   classList:{toggle(){}},
