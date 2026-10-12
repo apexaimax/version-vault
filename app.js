@@ -115,7 +115,7 @@ async function parseZip(file){
     if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
     if(data.length!==uncomp)throw new Error("ZIP entry size check failed: "+name);
     if(crc32(data)!==crc)throw new Error("ZIP CRC check failed: "+name);
-    files.set(name,{name,size:data.length,method,data,sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
+    files.set(name,{name,size:data.length,method,...(isText(name)&&data.length<=2e6?{data}:{}),sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
   }
   if(p!==directory.length)throw new Error("ZIP central directory size does not match its entries.");
   files.duplicates=duplicates;return files
