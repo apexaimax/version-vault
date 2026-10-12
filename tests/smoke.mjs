@@ -76,6 +76,12 @@ const context={
 vm.runInNewContext(app,context,{timeout:1000});
 assert.equal(typeof hooks.parseZip,"function","ZIP parser test hook was not installed");
 assert.equal(typeof hooks.inflateRaw,"function","bounded ZIP inflater test hook was not installed");
+// Security scan omissions must be observable, not silently reported as clean.
+const skippedScan=hooks.scanSecurity(new Map([["notes.txt",{name:"notes.txt",size:3000000,method:0,sha:"verified",crc32:"00000000"}]]));
+assert.ok(skippedScan.some(x=>x.level==="review"&&/not retained for security scanning/.test(x.msg)),"Skipped text must produce a review finding");
+const scannedText=hooks.scanSecurity(new Map([["notes.txt",{name:"notes.txt",size:4,method:0,data:new TextEncoder().encode("safe")}]]));
+assert.ok(!scannedText.some(x=>/not retained/.test(x.msg)),"Retained text must not be marked as skipped");
+
 const fileFrom=bytes=>({
   size:bytes.byteLength,
   async arrayBuffer(){return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)},
