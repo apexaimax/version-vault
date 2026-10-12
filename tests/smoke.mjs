@@ -156,7 +156,7 @@ const slicedFixture={
   }
 };
 const slicedParsed=await hooks.parseZip(slicedFixture);
-assert.equal(new TextDecoder().decode(slicedParsed.get("zip64-fixture.txt")?.data),"VersionVault ZIP64 fixture\\n");
+assert.equal(new TextDecoder().decode(slicedParsed.get("zip64-fixture.txt")?.data),"VersionVault ZIP64 fixture\n");
 assert.equal(fullArchiveReads,0,"ZIP parser must use bounded Blob slices instead of file.arrayBuffer()");
 assert.ok(sliceReads.length>=2,"ZIP parser should read metadata and entry data in bounded ranges");
 
