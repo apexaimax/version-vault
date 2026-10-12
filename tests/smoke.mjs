@@ -24,7 +24,7 @@ assert.match(app, /ZIP64 end-of-central-directory record/);
 assert.match(app, /ZIP64 locator/);
 assert.match(app, /ZIP64 extended information/);
 assert.match(app, /Multi-disk ZIP/);
-assert.match(app, /512 MiB browser safety limit/);
+assert.match(app, /per-entry browser safety limit/);
 assert.match(app, /ZIP CRC check failed/);
 assert.match(app, /duplicate filename/);
 assert.match(app, /oldSha/);
@@ -44,6 +44,7 @@ assert.match(app,/MAX_RETAINED_TEXT_BYTES=16\*1024\*1024/);
 assert.match(app,/data\.length<=MAX_RETAINED_TEXT_BYTES-retainedTextBytes/);
 assert.match(app,/if\(retainText\)retainedTextBytes\+=data\.length/);
 
+assert.match(app,/MAX_ENTRY_UNCOMPRESSED_BYTES=64\*1024\*1024/);
 const element=()=>({
   addEventListener(){},
   classList:{toggle(){}},
