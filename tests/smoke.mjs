@@ -150,6 +150,17 @@ await assert.rejects(
 const inflatedWithinLimit=await hooks.inflateRaw(deflateRawSync(Buffer.from("bounded payload")),1024);
 assert.equal(new TextDecoder().decode(inflatedWithinLimit),"bounded payload");
 
+// Runtime boundary tests for the new single-buffer inflater.
+for(const invalidLimit of [-1,1.5,64*1024*1024+1,Number.NaN]){
+  await assert.rejects(hooks.inflateRaw(deflateRawSync(Buffer.from("x")),invalidLimit),/inflation limit is invalid/i);
+}
+const exactPayload=Buffer.from("exact-size decompression");
+const exactInflated=await hooks.inflateRaw(deflateRawSync(exactPayload),exactPayload.length);
+assert.equal(Buffer.compare(Buffer.from(exactInflated),exactPayload),0,"Exact-sized output must not be truncated");
+await assert.rejects(hooks.inflateRaw(deflateRawSync(exactPayload),exactPayload.length-1),/expanded beyond/i);
+const emptyInflated=await hooks.inflateRaw(deflateRawSync(Buffer.alloc(0)),0);
+assert.equal(emptyInflated.length,0,"Empty deflate output should be accepted");
+
 // Reject an excessive declared entry count before processing central entries.
 const excessiveEntryCount=Buffer.from(fixture);
 const eocdForCount=excessiveEntryCount.lastIndexOf(Buffer.from("504b0506","hex"));
