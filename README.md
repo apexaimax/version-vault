@@ -4,7 +4,7 @@
 
 Compare two project ZIPs before you share, publish, or archive them—without uploading your source code.
 
-VersionVault is a private, browser-only release review tool. It identifies file-level changes between an older and newer ZIP, verifies supported entries, and highlights common packaging risks directly in your browser tab.
+VersionVault is a privacy-preserving, browser-only release review tool. It identifies file-level changes between an older and newer ZIP, verifies supported entries, and highlights common packaging risks directly in your browser tab.
 
 ## Why use it?
 
@@ -61,6 +61,10 @@ Run the test with:
 ```bash
 node tests/smoke.mjs
 ```
+
+## Try the demo
+
+Open the app and choose **Try a sample comparison**. Two synthetic ZIPs are generated locally to demonstrate added, removed, and changed files. No upload, account, or external service is needed.
 
 ## Run
 
