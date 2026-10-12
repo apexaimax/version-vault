@@ -23,6 +23,7 @@ const MAX_ENTRY_COMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRY_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_TOTAL_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRIES=100000;
+const MAX_RETAINED_TEXT_BYTES=16*1024*1024;
 async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
   if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");
   const ds=new DecompressionStream("deflate-raw");
@@ -86,7 +87,7 @@ async function parseZip(file){
   if(entries>MAX_ENTRIES)throw new Error("Archive contains more than 100,000 entries, above the browser safety limit.");
   if(cdOff>file.size||cdSize>file.size-cdOff)throw new Error("ZIP central directory is outside the archive.");
   const directory=await read(cdOff,cdSize);
-  const files=new Map(),duplicates=[];let p=0,totalUncompressed=0;
+  const files=new Map(),duplicates=[];let p=0,totalUncompressed=0,retainedTextBytes=0;
   for(let index=0;index<entries;index++){
     if(p+46>directory.length||u32(directory,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
     const diskStart=u16(directory,p+34),crc=u32(directory,p+16),method=u16(directory,p+10),comp32=u32(directory,p+20),uncomp32=u32(directory,p+24),nl=u16(directory,p+28),xl=u16(directory,p+30),cl=u16(directory,p+32),local32=u32(directory,p+42);
@@ -115,7 +116,9 @@ async function parseZip(file){
     if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
     if(data.length!==uncomp)throw new Error("ZIP entry size check failed: "+name);
     if(crc32(data)!==crc)throw new Error("ZIP CRC check failed: "+name);
-    files.set(name,{name,size:data.length,method,...(isText(name)&&data.length<=2e6?{data}:{}),sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
+    const retainText=isText(name)&&data.length<=2e6&&data.length<=MAX_RETAINED_TEXT_BYTES-retainedTextBytes;
+    if(retainText)retainedTextBytes+=data.length;
+    files.set(name,{name,size:data.length,method,...(retainText?{data}:{}),sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
   }
   if(p!==directory.length)throw new Error("ZIP central directory size does not match its entries.");
   files.duplicates=duplicates;return files
