@@ -1,0 +1,26 @@
+name: DiffHarbor streaming-hash parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'stream-hash.js'
+      - 'tests/stream-hash.mjs'
+      - '.github/workflows/stream-hash.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hash-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+        with:
+          node-version: 20
+      - name: Check streaming-hash syntax
+        run: node --check stream-hash.js
+      - name: Run incremental SHA-256 and CRC-32 vectors
+        run: node tests/stream-hash.mjs

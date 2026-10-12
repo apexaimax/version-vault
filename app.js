@@ -20,14 +20,16 @@ function u32(a,o){return (a[o]|a[o+1]<<8|a[o+2]<<16|a[o+3]<<24)>>>0}
 function crc32(buf){let c=~0;for(const b of buf){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0)}return (~c)>>>0}
 const MAX_ARCHIVE_BYTES=1024*1024*1024;
 const MAX_ENTRY_COMPRESSED_BYTES=512*1024*1024;
-const MAX_ENTRY_UNCOMPRESSED_BYTES=512*1024*1024;
+const MAX_ENTRY_UNCOMPRESSED_BYTES=64*1024*1024; // Conservative per-entry cap until streaming hashing is available.
 const MAX_TOTAL_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRIES=100000;
+const MAX_RETAINED_TEXT_BYTES=16*1024*1024;
 async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
+  if(!Number.isSafeInteger(maxBytes)||maxBytes<0||maxBytes>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP inflation limit is invalid or exceeds browser safety cap.");
   if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");
   const ds=new DecompressionStream("deflate-raw");
   const reader=new Blob([buf]).stream().pipeThrough(ds).getReader();
-  const chunks=[];let total=0;
+  const output=new Uint8Array(maxBytes);let total=0;
   try{
     while(true){
       const {done,value}=await reader.read();
@@ -36,12 +38,10 @@ async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
         await reader.cancel().catch(()=>{});
         throw new Error("ZIP entry expanded beyond its declared or permitted limit.");
       }
-      chunks.push(value);total+=value.byteLength;
+      output.set(value,total);total+=value.byteLength;
     }
   }finally{reader.releaseLock()}
-  const output=new Uint8Array(total);let offset=0;
-  for(const chunk of chunks){output.set(chunk,offset);offset+=chunk.byteLength}
-  return output
+  return total===maxBytes?output:output.slice(0,total)
 }
 function u64(a,o){const lo=BigInt(u32(a,o)),hi=BigInt(u32(a,o+4));return lo|(hi<<32n)}
 function toSafeNumber(n,label){if(n>BigInt(Number.MAX_SAFE_INTEGER))throw new Error(label+" exceeds browser-safe integer limits.");return Number(n)}
@@ -58,8 +58,9 @@ function zip64Values(extra,needSize,needUncomp,needOffset,needDisk){
 }
 async function parseZip(file){
   if(file.size>MAX_ARCHIVE_BYTES)throw new Error("Archive exceeds the 1 GiB browser safety limit.");
-  const buf=await file.arrayBuffer(),a=new Uint8Array(buf);let eocd=-1;
-  for(let i=a.length-22;i>=Math.max(0,a.length-65557);i--){if(u32(a,i)===0x06054b50){eocd=i;break}}
+  const read=async(start,length)=>{if(!Number.isSafeInteger(start)||!Number.isSafeInteger(length)||start<0||length<0||start>file.size||length>file.size-start)throw new Error("ZIP read is outside archive bounds.");return new Uint8Array(await file.slice(start,start+length).arrayBuffer())};
+  const tailStart=Math.max(0,file.size-65557),a=await read(tailStart,file.size-tailStart);let eocd=-1;
+  for(let i=a.length-22;i>=0;i--){if(u32(a,i)===0x06054b50){eocd=i;break}}
   if(eocd<0)throw new Error("Not a readable ZIP archive.");
   const disk=u16(a,eocd+4),cdDisk=u16(a,eocd+6),entriesDisk=u16(a,eocd+8),entries16=u16(a,eocd+10),cdSize32=u32(a,eocd+12),cdOff32=u32(a,eocd+16);
   if(disk!==0||cdDisk!==0)throw new Error("Multi-disk ZIP archives are not supported.");
@@ -71,24 +72,27 @@ async function parseZip(file){
     if(u32(a,locator)!==0x07064b50)throw new Error("ZIP64 locator is missing or malformed.");
     const locatorDisk=u32(a,locator+4),zip64Off=toSafeNumber(u64(a,locator+8),"ZIP64 end record offset"),totalDisks=u32(a,locator+16);
     if(locatorDisk!==0||totalDisks!==1)throw new Error("Multi-disk ZIP64 archives are not supported.");
-    if(zip64Off+56>a.length||u32(a,zip64Off)!==0x06064b50)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
-    const recordSize=toSafeNumber(u64(a,zip64Off+4),"ZIP64 end record size");
-    if(recordSize<44||zip64Off+12+recordSize>a.length)throw new Error("ZIP64 end-of-central-directory record is truncated.");
-    const recordDisk=u32(a,zip64Off+16),recordCdDisk=u32(a,zip64Off+20);
+    if(zip64Off+56>file.size)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
+    const recordHeader=await read(zip64Off,56);
+    if(u32(recordHeader,0)!==0x06064b50)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
+    const recordSize=toSafeNumber(u64(recordHeader,4),"ZIP64 end record size");
+    if(recordSize<44||zip64Off+12+recordSize>file.size)throw new Error("ZIP64 end-of-central-directory record is truncated.");
+    const recordDisk=u32(recordHeader,16),recordCdDisk=u32(recordHeader,20);
     if(recordDisk!==0||recordCdDisk!==0)throw new Error("Multi-disk ZIP64 archives are not supported.");
-    entries=toSafeNumber(u64(a,zip64Off+32),"ZIP64 entry count");
-    cdSize=toSafeNumber(u64(a,zip64Off+40),"ZIP64 central directory size");
-    cdOff=toSafeNumber(u64(a,zip64Off+48),"ZIP64 central directory offset");
+    entries=toSafeNumber(u64(recordHeader,32),"ZIP64 entry count");
+    cdSize=toSafeNumber(u64(recordHeader,40),"ZIP64 central directory size");
+    cdOff=toSafeNumber(u64(recordHeader,48),"ZIP64 central directory offset");
   }
   if(entries>MAX_ENTRIES)throw new Error("Archive contains more than 100,000 entries, above the browser safety limit.");
-  if(cdOff+cdSize>a.length)throw new Error("ZIP central directory is outside the archive.");
-  const files=new Map(),duplicates=[];let p=cdOff,totalUncompressed=0;
+  if(cdOff>file.size||cdSize>file.size-cdOff)throw new Error("ZIP central directory is outside the archive.");
+  const directory=await read(cdOff,cdSize);
+  const files=new Map(),duplicates=[];let p=0,totalUncompressed=0,retainedTextBytes=0;
   for(let index=0;index<entries;index++){
-    if(p+46>cdOff+cdSize||u32(a,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
-    const diskStart=u16(a,p+34),crc=u32(a,p+16),method=u16(a,p+10),comp32=u32(a,p+20),uncomp32=u32(a,p+24),nl=u16(a,p+28),xl=u16(a,p+30),cl=u16(a,p+32),local32=u32(a,p+42);
+    if(p+46>directory.length||u32(directory,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
+    const diskStart=u16(directory,p+34),crc=u32(directory,p+16),method=u16(directory,p+10),comp32=u32(directory,p+20),uncomp32=u32(directory,p+24),nl=u16(directory,p+28),xl=u16(directory,p+30),cl=u16(directory,p+32),local32=u32(directory,p+42);
     if(diskStart!==0xffff&&diskStart!==0)throw new Error("Multi-disk ZIP entries are not supported.");
-    if(p+46+nl+xl+cl>cdOff+cdSize)throw new Error("ZIP central directory entry is truncated.");
-    const name=new TextDecoder().decode(a.slice(p+46,p+46+nl)),extra=a.slice(p+46+nl,p+46+nl+xl);
+    if(p+46+nl+xl+cl>directory.length)throw new Error("ZIP central directory entry is truncated.");
+    const name=new TextDecoder().decode(directory.slice(p+46,p+46+nl)),extra=directory.slice(p+46+nl,p+46+nl+xl);
     const needsZip64=comp32===0xffffffff||uncomp32===0xffffffff||local32===0xffffffff||diskStart===0xffff;
     const z=zip64Values(extra,comp32===0xffffffff,uncomp32===0xffffffff,local32===0xffffffff,diskStart===0xffff);
     if(needsZip64&&!z)throw new Error("ZIP64 extended information field is missing: "+name);
@@ -96,18 +100,26 @@ async function parseZip(file){
     const comp=z?.comp!==null&&z?.comp!==undefined?toSafeNumber(z.comp,"Compressed entry size"):comp32;
     const uncomp=z?.uncomp!==null&&z?.uncomp!==undefined?toSafeNumber(z.uncomp,"Uncompressed entry size"):uncomp32;
     const local=z?.offset!==null&&z?.offset!==undefined?toSafeNumber(z.offset,"Local entry offset"):local32;
-    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the 512 MiB browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
+    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the per-entry browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
     p+=46+nl+xl+cl;if(name.endsWith("/"))continue;if(files.has(name))duplicates.push(name);
-    if(local+30>a.length||u32(a,local)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
-    const lnl=u16(a,local+26),lxl=u16(a,local+28),start=local+30+lnl+lxl;
-    if(start+comp>a.length)throw new Error("ZIP entry extends beyond the archive.");
-    const compressed=a.slice(start,start+comp);let data;
+    if(local+30>file.size)throw new Error("ZIP local file header is malformed.");
+    const localHeader=await read(local,30);
+    if(u32(localHeader,0)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
+    const lnl=u16(localHeader,26),lxl=u16(localHeader,28),start=local+30+lnl+lxl;
+    if(start>file.size)throw new Error("ZIP local file header is truncated.");
+    const localName=new TextDecoder().decode(await read(local+30,lnl));
+    if(localName!==name)throw new Error("ZIP local filename mismatch: "+name);
+    if(u16(localHeader,8)!==method)throw new Error("ZIP local compression method mismatch: "+name);
+    if(start+comp>file.size)throw new Error("ZIP entry extends beyond the archive.");
+    const compressed=await read(start,comp);let data;
     if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
     if(data.length!==uncomp)throw new Error("ZIP entry size check failed: "+name);
     if(crc32(data)!==crc)throw new Error("ZIP CRC check failed: "+name);
-    files.set(name,{name,size:data.length,method,data,sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
+    const retainText=isText(name)&&data.length<=2e6&&data.length<=MAX_RETAINED_TEXT_BYTES-retainedTextBytes;
+    if(retainText)retainedTextBytes+=data.length;
+    files.set(name,{name,size:data.length,method,...(retainText?{data}:{}),sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
   }
-  if(p!==cdOff+cdSize)throw new Error("ZIP central directory size does not match its entries.");
+  if(p!==directory.length)throw new Error("ZIP central directory size does not match its entries.");
   files.duplicates=duplicates;return files
 }
 // Kept out of production behavior: the Node regression suite supplies this
@@ -115,12 +127,13 @@ async function parseZip(file){
 if(typeof globalThis!=="undefined"&&globalThis.__VERSIONVAULT_TEST_HOOKS__){
   globalThis.__VERSIONVAULT_TEST_HOOKS__.parseZip=parseZip;
   globalThis.__VERSIONVAULT_TEST_HOOKS__.inflateRaw=inflateRaw;
+  globalThis.__VERSIONVAULT_TEST_HOOKS__.scanSecurity=scanSecurity;
 }
 function textOf(entry){if(!entry?.data||entry.data.length>2e6)return null;try{return new TextDecoder("utf-8",{fatal:false}).decode(entry.data)}catch{return null}}
 function isText(name){return /\.(txt|md|json|js|mjs|cjs|ts|tsx|jsx|css|html|htm|xml|yml|yaml|env|toml|ini|conf|config|sh|py|rb|go|rs|java|kt|swift)$/i.test(name)}
-function scanSecurity(files){const findings=[],secretPatterns=[[/^\s*(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|API_KEY|SECRET_KEY|PRIVATE_KEY|PASSWORD|TOKEN)\s*=\s*["']?[^"'\\s]{8,}/im,"Credential-like assignment"],[/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,"GitHub token-like string"],[/\bsk-[A-Za-z0-9_-]{20,}\b/,"OpenAI-key-like string"],[/-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,"Private key block"]];for(const [name,e] of files){if(/(^|\/)\.env(\.|$)|(^|\/)(id_rsa|credentials|secrets?)(\.|$)/i.test(name))findings.push({level:"review",file:name,msg:"Sensitive-looking filename"});if(/\.(exe|dll|dylib|so|bin|app)$/i.test(name))findings.push({level:"review",file:name,msg:"Executable/binary file"});if(e.unsupported)findings.push({level:"review",file:name,msg:"Compression method not supported by this browser build"});if(isText(name)){const t=textOf(e);if(t){for(const pat of secretPatterns){const re=pat instanceof RegExp?pat:pat[0];const msg=pat instanceof RegExp?"Secret-like string":pat[1];if(re.test(t)){findings.push({level:"block",file:name,msg});break}}}}}const manifest=files.get("manifest.json")||[...files.values()].find(e=>/\/manifest\.json$/i.test(e.name));if(manifest){try{const m=JSON.parse(textOf(manifest)||"{}");for(const k of ["permissions","host_permissions","optional_permissions"]){if(Array.isArray(m[k])&&m[k].length)findings.push({level:"review",file:manifest.name,msg:`${k}: ${m[k].join(", ")}`})}}catch{findings.push({level:"review",file:manifest.name,msg:"Manifest JSON could not be parsed"})}}return findings}
+function scanSecurity(files){const findings=[],secretPatterns=[[/^\s*(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|API_KEY|SECRET_KEY|PRIVATE_KEY|PASSWORD|TOKEN)\s*=\s*["']?[^"'\\s]{8,}/im,"Credential-like assignment"],[/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,"GitHub token-like string"],[/\bsk-[A-Za-z0-9_-]{20,}\b/,"OpenAI-key-like string"],[/-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/,"Private key block"]];for(const [name,e] of files){if(/(^|\/)\.env(\.|$)|(^|\/)(id_rsa|credentials|secrets?)(\.|$)/i.test(name))findings.push({level:"review",file:name,msg:"Sensitive-looking filename"});if(/\.(exe|dll|dylib|so|bin|app)$/i.test(name))findings.push({level:"review",file:name,msg:"Executable/binary file"});if(e.unsupported)findings.push({level:"review",file:name,msg:"Compression method not supported by this browser build"});if(isText(name)&&!e.unsupported&&e.data===undefined)findings.push({level:"review",file:name,msg:"Text content was not retained for security scanning (size or memory budget); integrity checks still ran."});if(isText(name)){const t=textOf(e);if(t){for(const pat of secretPatterns){const re=pat instanceof RegExp?pat:pat[0];const msg=pat instanceof RegExp?"Secret-like string":pat[1];if(re.test(t)){findings.push({level:"block",file:name,msg});break}}}}}const manifest=files.get("manifest.json")||[...files.values()].find(e=>/\/manifest\.json$/i.test(e.name));if(manifest){try{const m=JSON.parse(textOf(manifest)||"{}");for(const k of ["permissions","host_permissions","optional_permissions"]){if(Array.isArray(m[k])&&m[k].length)findings.push({level:"review",file:manifest.name,msg:`${k}: ${m[k].join(", ")}`})}}catch{findings.push({level:"review",file:manifest.name,msg:"Manifest JSON could not be parsed"})}}return findings}
 function packageMeta(files){const p=[...files.values()].find(e=>/^(?:.*\/)?package\.json$/i.test(e.name));if(!p)return null;try{const j=JSON.parse(textOf(p)||"{}");return{name:j.name||"",version:j.version||"",scripts:j.scripts||{},dependencies:Object.keys(j.dependencies||{}),devDependencies:Object.keys(j.devDependencies||{})}}catch{return{error:"package.json could not be parsed"}}}
-async function analyze(){$("#status").textContent="Reading both ZIP archives locally…";try{state.oldFiles=await parseZip(state.old);state.newFiles=await parseZip(state.new);const oldSet=new Set(state.oldFiles.keys()),newSet=new Set(state.newFiles.keys());const added=[...newSet].filter(x=>!oldSet.has(x)).sort(),removed=[...oldSet].filter(x=>!newSet.has(x)).sort(),changed=[],same=[];for(const name of [...newSet].filter(x=>oldSet.has(x)).sort()){const a=state.oldFiles.get(name),b=state.newFiles.get(name);if(a.sha&&b.sha&&a.sha!==b.sha)changed.push(name);else if(a.sha&&b.sha)same.push(name)}const sec=[...scanSecurity(state.oldFiles).map(x=>({...x,version:"old"})),...scanSecurity(state.newFiles).map(x=>({...x,version:"new"}))];const oldPkg=packageMeta(state.oldFiles),newPkg=packageMeta(state.newFiles);const findings=[];if(sec.some(x=>x.level==="block"))findings.push({level:"block",msg:"Potential secret/private-key material detected. Review before release."});else if(sec.length)findings.push({level:"review",msg:`${sec.length} security/configuration finding(s) require review.`});else findings.push({level:"pass",msg:"No obvious secret-like patterns or sensitive filenames were detected."});if(newPkg?.version&&/1\.3\.1/.test(newPkg.version)&&/1\.4\.0/.test(state.new.name))findings.push({level:"review",msg:"Archive name suggests 1.4.0 but package.json still reports 1.3.1."});if(state.oldFiles.duplicates?.length)findings.push({level:"review",msg:"Old archive contains duplicate filename(s): "+state.oldFiles.duplicates.join(", ")});if(state.newFiles.duplicates?.length)findings.push({level:"review",msg:"New archive contains duplicate filename(s): "+state.newFiles.duplicates.join(", ")});if([...state.oldFiles.values(),...state.newFiles.values()].some(x=>x.unsupported))findings.push({level:"review",msg:"One or more ZIP entries use a compression method this browser build cannot inspect."});const changedDetails=changed.map(name=>({name,oldSha:state.oldFiles.get(name)?.sha||null,newSha:state.newFiles.get(name)?.sha||null}));const result={added,removed,changed,same,changedDetails,security:sec,oldPkg,newPkg,findings,oldCount:oldSet.size,newCount:newSet.size,oldDuplicates:state.oldFiles.duplicates||[],newDuplicates:state.newFiles.duplicates||[]};state.result=result;render(result);$("#results").hidden=false;showTab("overview");$("#status").textContent="Analysis complete. Files never left this browser tab."}catch(e){$("#status").textContent="Could not analyze: "+e.message}}
+async function analyze(){$("#status").textContent="Reading both ZIP archives locally…";state.oldFiles=null;state.newFiles=null;state.result=null;try{state.oldFiles=await parseZip(state.old);state.newFiles=await parseZip(state.new);const oldSet=new Set(state.oldFiles.keys()),newSet=new Set(state.newFiles.keys());const added=[...newSet].filter(x=>!oldSet.has(x)).sort(),removed=[...oldSet].filter(x=>!newSet.has(x)).sort(),changed=[],same=[];for(const name of [...newSet].filter(x=>oldSet.has(x)).sort()){const a=state.oldFiles.get(name),b=state.newFiles.get(name);if(a.sha&&b.sha&&a.sha!==b.sha)changed.push(name);else if(a.sha&&b.sha)same.push(name)}const sec=[...scanSecurity(state.oldFiles).map(x=>({...x,version:"old"})),...scanSecurity(state.newFiles).map(x=>({...x,version:"new"}))];const oldPkg=packageMeta(state.oldFiles),newPkg=packageMeta(state.newFiles);const findings=[];if(sec.some(x=>x.level==="block"))findings.push({level:"block",msg:"Potential secret/private-key material detected. Review before release."});else if(sec.length)findings.push({level:"review",msg:`${sec.length} security/configuration finding(s) require review.`});else findings.push({level:"pass",msg:"No obvious secret-like patterns or sensitive filenames were detected."});if(newPkg?.version&&/1\.3\.1/.test(newPkg.version)&&/1\.4\.0/.test(state.new.name))findings.push({level:"review",msg:"Archive name suggests 1.4.0 but package.json still reports 1.3.1."});if(state.oldFiles.duplicates?.length)findings.push({level:"review",msg:"Old archive contains duplicate filename(s): "+state.oldFiles.duplicates.join(", ")});if(state.newFiles.duplicates?.length)findings.push({level:"review",msg:"New archive contains duplicate filename(s): "+state.newFiles.duplicates.join(", ")});if([...state.oldFiles.values(),...state.newFiles.values()].some(x=>x.unsupported))findings.push({level:"review",msg:"One or more ZIP entries use a compression method this browser build cannot inspect."});const changedDetails=changed.map(name=>({name,oldSha:state.oldFiles.get(name)?.sha||null,newSha:state.newFiles.get(name)?.sha||null}));const result={added,removed,changed,same,changedDetails,security:sec,oldPkg,newPkg,findings,oldCount:oldSet.size,newCount:newSet.size,oldDuplicates:state.oldFiles.duplicates||[],newDuplicates:state.newFiles.duplicates||[]};state.result=result;render(result);$("#results").hidden=false;showTab("overview");$("#status").textContent="Analysis complete. Files never left this browser tab."}catch(e){state.result=null;$("#results").hidden=true;$("#status").textContent="Could not analyze: "+e.message}finally{state.oldFiles=null;state.newFiles=null}}
 function badge(level){return `<span class="badge ${level}">${level.toUpperCase()}</span>`}
 function render(r){$("#summary").innerHTML=`<div class="stats"><div class="stat"><b>${human(r.added.length)}</b><span>Added</span></div><div class="stat"><b>${human(r.removed.length)}</b><span>Removed</span></div><div class="stat"><b>${human(r.changed.length)}</b><span>Changed</span></div><div class="stat"><b>${human(r.same.length)}</b><span>Unchanged</span></div><div class="stat"><b>${human(r.security.length)}</b><span>Security findings</span></div></div>`;$("#tab-overview").innerHTML=`<div class="panel"><h3>Release review</h3>${r.findings.map(f=>`<div class="finding">${badge(f.level)}<div>${esc(f.msg)}</div></div>`).join("")}</div><div class="panel"><h3>Package sizes</h3><div class="finding"><span class="muted">Old</span><b>${esc(state.old.name)}</b><span>${bytes(state.old.size)}</span></div><div class="finding"><span class="muted">New</span><b>${esc(state.new.name)}</b><span>${bytes(state.new.size)}</span></div></div>`;$("#tab-diff").innerHTML=diffHtml(r);$("#tab-security").innerHTML=securityHtml(r);$("#tab-metadata").innerHTML=metaHtml(r);$("#tab-report").innerHTML=reportHtml(r)}
 function list(title,arr,cls){return `<div class="panel"><h3>${title} <span class="muted">(${arr.length})</span></h3><div class="filelist">${arr.length?arr.map(x=>`<div class="row ${cls||""}">${esc(x)}</div>`).join(""):'<div class="muted">None</div>'}</div></div>`}
@@ -128,6 +141,6 @@ function diffHtml(r){return list("Added files",r.added,"added")+list("Removed fi
 function securityHtml(r){return `<div class="panel"><h3>Security/configuration review</h3>${r.security.length?r.security.map(x=>`<div class="finding">${badge(x.level)}<div><b>${esc(x.file)}</b><br>${esc(x.msg)} <span class="muted">(${x.version})</span></div></div>`).join(""):'<div class="finding">'+badge("pass")+'<div>No obvious findings.</div></div>'}</div><div class="panel"><h3>Important limitation</h3><p class="muted">This is a heuristic scanner. A PASS does not prove a project is secure, and a REVIEW finding is not proof that a secret or vulnerability exists.</p></div>`}
 function metaHtml(r){return `<div class="panel"><h3>package.json</h3>${r.newPkg?`<p><b>Name:</b> ${esc(r.newPkg.name||"—")}<br><b>Version:</b> ${esc(r.newPkg.version||"—")}<br><b>Dependencies:</b> ${r.newPkg.dependencies?.length||0}<br><b>Dev dependencies:</b> ${r.newPkg.devDependencies?.length||0}</p>`:'<p class="muted">No package.json found.</p>'}</div>`}
 function reportHtml(r){const report=makeReport(r);return `<div class="panel"><h3>Release Verification Report</h3><div class="reportActions"><button class="secondary" id="copyReport">Copy report</button><button class="secondary" id="downloadReport">Download report</button></div><pre class="code" id="reportText">${esc(report)}</pre></div>`}
-function makeReport(r){return "VERSIONVAULT RELEASE VERIFICATION REPORT\nGenerated: "+new Date().toISOString()+"\nOld: "+state.old.name+" ("+bytes(state.old.size)+")\nNew: "+state.new.name+" ("+bytes(state.new.size)+")\n\nFILE CHANGES\nAdded: "+r.added.length+"\nRemoved: "+r.removed.length+"\nChanged: "+r.changed.length+"\nUnchanged: "+r.same.length+"\n\nCHANGED FILE HASHES\n"+(r.changedDetails.map(x=>x.name+"\\n  OLD SHA-256: "+(x.oldSha||"unavailable")+"\\n  NEW SHA-256: "+(x.newSha||"unavailable")).join("\\n")||"None.")+"\n\nSECURITY / CONFIGURATION\nFindings: "+r.security.length+"\n"+(r.security.map(x=>"["+x.level.toUpperCase()+"] "+x.version+": "+x.file+" — "+x.msg).join("\\n")||"None detected.")+"\n\nARCHIVE INTEGRITY\nOld duplicate filenames: "+r.oldDuplicates.length+"\nNew duplicate filenames: "+r.newDuplicates.length+"\nZIP entry CRC-32 checks: passed for inspected supported entries.\n\nREVIEW NOTES\n"+r.findings.map(x=>"["+x.level.toUpperCase()+"] "+x.msg).join("\\n")+"\n\nIMPORTANT\nSHA-256 values and comparisons describe the files observed during this scan.\nThey do not prove authorship, authenticity, safety, or absence of vulnerabilities.\n"}
-document.addEventListener("click",e=>{if(e.target.id==="copyReport"){navigator.clipboard?.writeText(makeReport(state.result));e.target.textContent="Copied";setTimeout(()=>e.target.textContent="Copy report",1200)}if(e.target.id==="downloadReport"){const blob=new Blob([makeReport(state.result)],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="versionvault-release-report.txt";a.click();URL.revokeObjectURL(a.href)}})
+function makeReport(r){return "DIFFHARBOR RELEASE VERIFICATION REPORT\nGenerated: "+new Date().toISOString()+"\nOld: "+state.old.name+" ("+bytes(state.old.size)+")\nNew: "+state.new.name+" ("+bytes(state.new.size)+")\n\nFILE CHANGES\nAdded: "+r.added.length+"\nRemoved: "+r.removed.length+"\nChanged: "+r.changed.length+"\nUnchanged: "+r.same.length+"\n\nCHANGED FILE HASHES\n"+(r.changedDetails.map(x=>x.name+"\\n  OLD SHA-256: "+(x.oldSha||"unavailable")+"\\n  NEW SHA-256: "+(x.newSha||"unavailable")).join("\\n")||"None.")+"\n\nSECURITY / CONFIGURATION\nFindings: "+r.security.length+"\n"+(r.security.map(x=>"["+x.level.toUpperCase()+"] "+x.version+": "+x.file+" — "+x.msg).join("\\n")||"None detected.")+"\n\nARCHIVE INTEGRITY\nOld duplicate filenames: "+r.oldDuplicates.length+"\nNew duplicate filenames: "+r.newDuplicates.length+"\nZIP entry CRC-32 checks: passed for inspected supported entries.\n\nREVIEW NOTES\n"+r.findings.map(x=>"["+x.level.toUpperCase()+"] "+x.msg).join("\\n")+"\n\nIMPORTANT\nSHA-256 values and comparisons describe the files observed during this scan.\nThey do not prove authorship, authenticity, safety, or absence of vulnerabilities.\n"}
+document.addEventListener("click",e=>{if(e.target.id==="copyReport"){navigator.clipboard?.writeText(makeReport(state.result));e.target.textContent="Copied";setTimeout(()=>e.target.textContent="Copy report",1200)}if(e.target.id==="downloadReport"){const blob=new Blob([makeReport(state.result)],{type:"text/plain"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="diffharbor-release-report.txt";a.click();URL.revokeObjectURL(a.href)}})
 })();
