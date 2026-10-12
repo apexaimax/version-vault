@@ -142,6 +142,23 @@ await assert.rejects(
   "Excessive ZIP64 entry count must be rejected"
 );
 
+// Red test for bounded ZIP reads: parser must not load the entire archive.
+let fullArchiveReads=0;
+const sliceReads=[];
+const slicedFixture={
+  size:fixture.byteLength,
+  async arrayBuffer(){fullArchiveReads++;throw new Error("whole-archive read forbidden")},
+  slice(start=0,end=fixture.byteLength){
+    sliceReads.push([start,end]);
+    const part=fixture.subarray(start,end);
+    return {async arrayBuffer(){return part.buffer.slice(part.byteOffset,part.byteOffset+part.byteLength)}};
+  }
+};
+const slicedParsed=await hooks.parseZip(slicedFixture);
+assert.equal(new TextDecoder().decode(slicedParsed.get("zip64-fixture.txt")?.data),"VersionVault ZIP64 fixture\\n");
+assert.equal(fullArchiveReads,0,"ZIP parser must use bounded Blob slices instead of file.arrayBuffer()");
+assert.ok(sliceReads.length>=2,"ZIP parser should read metadata and entry data in bounded ranges");
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
