@@ -196,4 +196,38 @@ await assert.rejects(
   "Multi-disk ZIP rejection did not run"
 );
 
+
+// Stress and boundary checks: large logical archive, bounded reads, and repeated scans.
+const logicalSize=64*1024*1024;
+let largestRead=0,readCount=0;
+const sparseArchive={
+  size:logicalSize,
+  slice(start,end){
+    const length=end-start;
+    largestRead=Math.max(largestRead,length);readCount++;
+    // Sparse prefix is zero-filled; valid fixture is placed at the end.
+    const out=Buffer.alloc(length);
+    const fixtureStart=logicalSize-fixture.length;
+    const overlapStart=Math.max(start,fixtureStart),overlapEnd=Math.min(end,logicalSize);
+    if(overlapEnd>overlapStart)fixture.copy(out,overlapStart-start,overlapStart-fixtureStart,overlapEnd-fixtureStart);
+    return {async arrayBuffer(){return out.buffer.slice(out.byteOffset,out.byteOffset+out.byteLength)}};
+  }
+};
+await assert.rejects(hooks.parseZip(sparseArchive),/ZIP64|malformed|missing|outside|central directory|local file header/i,
+  "Sparse archive with relocated ZIP64 offsets must be rejected safely");
+assert.ok(largestRead<=65557,"Sparse archive metadata reads must stay bounded");
+assert.ok(readCount>=1,"Sparse archive must be inspected");
+
+for(let i=0;i<20;i++){
+  const again=await hooks.parseZip(fileFrom(fixture));
+  assert.equal(again.get("zip64-fixture.txt")?.sha,parsed.get("zip64-fixture.txt")?.sha,
+    "Repeated comparisons must produce stable hashes");
+  assert.equal(again.get("zip64-fixture.txt")?.crc32,parsed.get("zip64-fixture.txt")?.crc32,
+    "Repeated comparisons must preserve CRC checks");
+}
+for(const limit of [0,1,32,1024,65536]){
+  await assert.rejects(hooks.inflateRaw(deflateRawSync(Buffer.alloc(256*1024,88)),limit),
+    /beyond.*limit/i,"Inflation must reject output above "+limit+" bytes");
+}
+
 console.log("VersionVault smoke checks passed.");
