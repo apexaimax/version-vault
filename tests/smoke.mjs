@@ -120,6 +120,28 @@ await assert.rejects(
 );
 assert.equal(oversizedArchiveRead,false,"Oversized ZIP was loaded into memory");
 
+// Batch memory regressions: compressed output and metadata limits.
+const expandedPayload2=Buffer.alloc(1024*1024,65);
+await assert.rejects(
+  hooks.inflateRaw(deflateRawSync(expandedPayload2),4096),
+  /exceeded.*limit|beyond.*limit/i,
+  "Highly compressible content must respect the decompression output limit"
+);
+const inflatedWithinLimit=await hooks.inflateRaw(deflateRawSync(Buffer.from("bounded payload")),1024);
+assert.equal(new TextDecoder().decode(inflatedWithinLimit),"bounded payload");
+
+// Reject an excessive declared entry count before processing central entries.
+const excessiveEntryCount=Buffer.from(fixture);
+const eocdForCount=excessiveEntryCount.lastIndexOf(Buffer.from("504b0506","hex"));
+const zip64ForCount=excessiveEntryCount.lastIndexOf(Buffer.from("504b0606","hex"));
+assert.ok(eocdForCount>0&&zip64ForCount>0);
+excessiveEntryCount.writeBigUInt64LE(100001n,zip64ForCount+32);
+await assert.rejects(
+  hooks.parseZip(fileFrom(excessiveEntryCount)),
+  /more than 100,000 entries/i,
+  "Excessive ZIP64 entry count must be rejected"
+);
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
