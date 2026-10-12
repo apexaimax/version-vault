@@ -100,6 +100,10 @@ async function parseZip(file){
     p+=46+nl+xl+cl;if(name.endsWith("/"))continue;if(files.has(name))duplicates.push(name);
     if(local+30>a.length||u32(a,local)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
     const lnl=u16(a,local+26),lxl=u16(a,local+28),start=local+30+lnl+lxl;
+    if(start>a.length)throw new Error("ZIP local file header is truncated.");
+    const localName=new TextDecoder().decode(a.slice(local+30,local+30+lnl));
+    if(localName!==name)throw new Error("ZIP local filename mismatch: "+name);
+    if(u16(a,local+8)!==method)throw new Error("ZIP local compression method mismatch: "+name);
     if(start+comp>a.length)throw new Error("ZIP entry extends beyond the archive.");
     const compressed=a.slice(start,start+comp);let data;
     if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
