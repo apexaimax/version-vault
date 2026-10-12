@@ -97,6 +97,17 @@ await assert.rejects(
   "Out-of-bounds ZIP64 end-of-central-directory offsets must be rejected"
 );
 
+// Malformed ZIP64 record: reject a declared size larger than available bytes.
+const truncatedZip64Record=Buffer.from(fixture);
+const zip64RecordAt=truncatedZip64Record.lastIndexOf(Buffer.from("504b0606","hex"));
+assert.ok(zip64RecordAt>0,"ZIP64 EOCD record is missing");
+truncatedZip64Record.writeBigUInt64LE(BigInt(truncatedZip64Record.length+4096),zip64RecordAt+4);
+await assert.rejects(
+  hooks.parseZip(fileFrom(truncatedZip64Record)),
+  /ZIP64|outside|bounds|malformed|truncated|record/i,
+  "Oversized ZIP64 end-of-central-directory records must be rejected"
+);
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
