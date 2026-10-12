@@ -28,7 +28,7 @@ async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
   if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");
   const ds=new DecompressionStream("deflate-raw");
   const reader=new Blob([buf]).stream().pipeThrough(ds).getReader();
-  const chunks=[];let total=0;
+  const output=new Uint8Array(maxBytes);let total=0;
   try{
     while(true){
       const {done,value}=await reader.read();
@@ -37,12 +37,10 @@ async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
         await reader.cancel().catch(()=>{});
         throw new Error("ZIP entry expanded beyond its declared or permitted limit.");
       }
-      chunks.push(value);total+=value.byteLength;
+      output.set(value,total);total+=value.byteLength;
     }
   }finally{reader.releaseLock()}
-  const output=new Uint8Array(total);let offset=0;
-  for(const chunk of chunks){output.set(chunk,offset);offset+=chunk.byteLength}
-  return output
+  return output.slice(0,total)
 }
 function u64(a,o){const lo=BigInt(u32(a,o)),hi=BigInt(u32(a,o+4));return lo|(hi<<32n)}
 function toSafeNumber(n,label){if(n>BigInt(Number.MAX_SAFE_INTEGER))throw new Error(label+" exceeds browser-safe integer limits.");return Number(n)}
