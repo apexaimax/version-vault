@@ -89,7 +89,7 @@ async function parseZip(file){
   const files=new Map(),duplicates=[];let p=0,totalUncompressed=0;
   for(let index=0;index<entries;index++){
     if(p+46>directory.length||u32(directory,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
-    const diskStart=u16(directory,p+34),crc=u32(a,p+16),method=u16(directory,p+10),comp32=u32(a,p+20),uncomp32=u32(a,p+24),nl=u16(directory,p+28),xl=u16(directory,p+30),cl=u16(directory,p+32),local32=u32(a,p+42);
+    const diskStart=u16(directory,p+34),crc=u32(directory,p+16),method=u16(directory,p+10),comp32=u32(directory,p+20),uncomp32=u32(directory,p+24),nl=u16(directory,p+28),xl=u16(directory,p+30),cl=u16(directory,p+32),local32=u32(directory,p+42);
     if(diskStart!==0xffff&&diskStart!==0)throw new Error("Multi-disk ZIP entries are not supported.");
     if(p+46+nl+xl+cl>directory.length)throw new Error("ZIP central directory entry is truncated.");
     const name=new TextDecoder().decode(directory.slice(p+46,p+46+nl)),extra=directory.slice(p+46+nl,p+46+nl+xl);
