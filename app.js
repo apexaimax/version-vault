@@ -25,6 +25,7 @@ const MAX_TOTAL_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRIES=100000;
 const MAX_RETAINED_TEXT_BYTES=16*1024*1024;
 async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
+  if(!Number.isSafeInteger(maxBytes)||maxBytes<0||maxBytes>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP inflation limit is invalid or exceeds browser safety cap.");
   if(typeof DecompressionStream==="undefined")throw new Error("This browser does not provide ZIP decompression support.");
   const ds=new DecompressionStream("deflate-raw");
   const reader=new Blob([buf]).stream().pipeThrough(ds).getReader();
