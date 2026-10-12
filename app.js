@@ -20,7 +20,7 @@ function u32(a,o){return (a[o]|a[o+1]<<8|a[o+2]<<16|a[o+3]<<24)>>>0}
 function crc32(buf){let c=~0;for(const b of buf){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0)}return (~c)>>>0}
 const MAX_ARCHIVE_BYTES=1024*1024*1024;
 const MAX_ENTRY_COMPRESSED_BYTES=512*1024*1024;
-const MAX_ENTRY_UNCOMPRESSED_BYTES=512*1024*1024;
+const MAX_ENTRY_UNCOMPRESSED_BYTES=64*1024*1024; // Conservative per-entry cap until streaming hashing is available.
 const MAX_TOTAL_UNCOMPRESSED_BYTES=512*1024*1024;
 const MAX_ENTRIES=100000;
 const MAX_RETAINED_TEXT_BYTES=16*1024*1024;
@@ -101,7 +101,7 @@ async function parseZip(file){
     const comp=z?.comp!==null&&z?.comp!==undefined?toSafeNumber(z.comp,"Compressed entry size"):comp32;
     const uncomp=z?.uncomp!==null&&z?.uncomp!==undefined?toSafeNumber(z.uncomp,"Uncompressed entry size"):uncomp32;
     const local=z?.offset!==null&&z?.offset!==undefined?toSafeNumber(z.offset,"Local entry offset"):local32;
-    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the 512 MiB browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
+    if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the per-entry browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
     p+=46+nl+xl+cl;if(name.endsWith("/"))continue;if(files.has(name))duplicates.push(name);
     if(local+30>file.size)throw new Error("ZIP local file header is malformed.");
     const localHeader=await read(local,30);
