@@ -86,6 +86,17 @@ await assert.rejects(
   "Conflicting ZIP compression methods must be rejected"
 );
 
+// Malformed ZIP64 locator must never be interpreted as a valid archive.
+const invalidZip64Locator=Buffer.from(fixture);
+const zip64LocatorAt=invalidZip64Locator.lastIndexOf(Buffer.from("504b0607","hex"));
+assert.ok(zip64LocatorAt>0,"ZIP64 locator is missing");
+invalidZip64Locator.writeBigUInt64LE(BigInt(invalidZip64Locator.length+4096),zip64LocatorAt+8);
+await assert.rejects(
+  hooks.parseZip(fileFrom(invalidZip64Locator)),
+  /ZIP64|outside|bounds|malformed|truncated/i,
+  "Out-of-bounds ZIP64 end-of-central-directory offsets must be rejected"
+);
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
