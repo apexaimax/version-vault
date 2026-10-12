@@ -58,8 +58,9 @@ function zip64Values(extra,needSize,needUncomp,needOffset,needDisk){
 }
 async function parseZip(file){
   if(file.size>MAX_ARCHIVE_BYTES)throw new Error("Archive exceeds the 1 GiB browser safety limit.");
-  const buf=await file.arrayBuffer(),a=new Uint8Array(buf);let eocd=-1;
-  for(let i=a.length-22;i>=Math.max(0,a.length-65557);i--){if(u32(a,i)===0x06054b50){eocd=i;break}}
+  const read=async(start,length)=>{if(!Number.isSafeInteger(start)||!Number.isSafeInteger(length)||start<0||length<0||start>file.size||length>file.size-start)throw new Error("ZIP read is outside archive bounds.");return new Uint8Array(await file.slice(start,start+length).arrayBuffer())};
+  const tailStart=Math.max(0,file.size-65557),a=await read(tailStart,file.size-tailStart);let eocd=-1;
+  for(let i=a.length-22;i>=0;i--){if(u32(a,i)===0x06054b50){eocd=i;break}}
   if(eocd<0)throw new Error("Not a readable ZIP archive.");
   const disk=u16(a,eocd+4),cdDisk=u16(a,eocd+6),entriesDisk=u16(a,eocd+8),entries16=u16(a,eocd+10),cdSize32=u32(a,eocd+12),cdOff32=u32(a,eocd+16);
   if(disk!==0||cdDisk!==0)throw new Error("Multi-disk ZIP archives are not supported.");
@@ -71,24 +72,27 @@ async function parseZip(file){
     if(u32(a,locator)!==0x07064b50)throw new Error("ZIP64 locator is missing or malformed.");
     const locatorDisk=u32(a,locator+4),zip64Off=toSafeNumber(u64(a,locator+8),"ZIP64 end record offset"),totalDisks=u32(a,locator+16);
     if(locatorDisk!==0||totalDisks!==1)throw new Error("Multi-disk ZIP64 archives are not supported.");
-    if(zip64Off+56>a.length||u32(a,zip64Off)!==0x06064b50)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
-    const recordSize=toSafeNumber(u64(a,zip64Off+4),"ZIP64 end record size");
-    if(recordSize<44||zip64Off+12+recordSize>a.length)throw new Error("ZIP64 end-of-central-directory record is truncated.");
-    const recordDisk=u32(a,zip64Off+16),recordCdDisk=u32(a,zip64Off+20);
+    if(zip64Off+56>file.size)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
+    const recordHeader=await read(zip64Off,56);
+    if(u32(recordHeader,0)!==0x06064b50)throw new Error("ZIP64 end-of-central-directory record is missing or malformed.");
+    const recordSize=toSafeNumber(u64(recordHeader,4),"ZIP64 end record size");
+    if(recordSize<44||zip64Off+12+recordSize>file.size)throw new Error("ZIP64 end-of-central-directory record is truncated.");
+    const recordDisk=u32(recordHeader,16),recordCdDisk=u32(recordHeader,20);
     if(recordDisk!==0||recordCdDisk!==0)throw new Error("Multi-disk ZIP64 archives are not supported.");
-    entries=toSafeNumber(u64(a,zip64Off+32),"ZIP64 entry count");
-    cdSize=toSafeNumber(u64(a,zip64Off+40),"ZIP64 central directory size");
-    cdOff=toSafeNumber(u64(a,zip64Off+48),"ZIP64 central directory offset");
+    entries=toSafeNumber(u64(recordHeader,32),"ZIP64 entry count");
+    cdSize=toSafeNumber(u64(recordHeader,40),"ZIP64 central directory size");
+    cdOff=toSafeNumber(u64(recordHeader,48),"ZIP64 central directory offset");
   }
   if(entries>MAX_ENTRIES)throw new Error("Archive contains more than 100,000 entries, above the browser safety limit.");
-  if(cdOff+cdSize>a.length)throw new Error("ZIP central directory is outside the archive.");
-  const files=new Map(),duplicates=[];let p=cdOff,totalUncompressed=0;
+  if(directory.length>file.size)throw new Error("ZIP central directory is outside the archive.");
+  const directory=await read(cdOff,cdSize);
+  const files=new Map(),duplicates=[];let p=0,totalUncompressed=0;
   for(let index=0;index<entries;index++){
-    if(p+46>cdOff+cdSize||u32(a,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
-    const diskStart=u16(a,p+34),crc=u32(a,p+16),method=u16(a,p+10),comp32=u32(a,p+20),uncomp32=u32(a,p+24),nl=u16(a,p+28),xl=u16(a,p+30),cl=u16(a,p+32),local32=u32(a,p+42);
+    if(p+46>directory.length||u32(directory,p)!==0x02014b50)throw new Error("ZIP central directory is malformed.");
+    const diskStart=u16(directory,p+34),crc=u32(a,p+16),method=u16(directory,p+10),comp32=u32(a,p+20),uncomp32=u32(a,p+24),nl=u16(directory,p+28),xl=u16(directory,p+30),cl=u16(directory,p+32),local32=u32(a,p+42);
     if(diskStart!==0xffff&&diskStart!==0)throw new Error("Multi-disk ZIP entries are not supported.");
-    if(p+46+nl+xl+cl>cdOff+cdSize)throw new Error("ZIP central directory entry is truncated.");
-    const name=new TextDecoder().decode(a.slice(p+46,p+46+nl)),extra=a.slice(p+46+nl,p+46+nl+xl);
+    if(p+46+nl+xl+cl>directory.length)throw new Error("ZIP central directory entry is truncated.");
+    const name=new TextDecoder().decode(directory.slice(p+46,p+46+nl)),extra=directory.slice(p+46+nl,p+46+nl+xl);
     const needsZip64=comp32===0xffffffff||uncomp32===0xffffffff||local32===0xffffffff||diskStart===0xffff;
     const z=zip64Values(extra,comp32===0xffffffff,uncomp32===0xffffffff,local32===0xffffffff,diskStart===0xffff);
     if(needsZip64&&!z)throw new Error("ZIP64 extended information field is missing: "+name);
@@ -98,20 +102,22 @@ async function parseZip(file){
     const local=z?.offset!==null&&z?.offset!==undefined?toSafeNumber(z.offset,"Local entry offset"):local32;
     if(comp>MAX_ENTRY_COMPRESSED_BYTES||uncomp>MAX_ENTRY_UNCOMPRESSED_BYTES)throw new Error("ZIP entry exceeds the 512 MiB browser safety limit: "+name);if((method===0||method===8)&&uncomp>MAX_TOTAL_UNCOMPRESSED_BYTES-totalUncompressed)throw new Error("Archive exceeds the 512 MiB total uncompressed browser safety limit.");if(method===0||method===8)totalUncompressed+=uncomp;
     p+=46+nl+xl+cl;if(name.endsWith("/"))continue;if(files.has(name))duplicates.push(name);
-    if(local+30>a.length||u32(a,local)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
-    const lnl=u16(a,local+26),lxl=u16(a,local+28),start=local+30+lnl+lxl;
-    if(start>a.length)throw new Error("ZIP local file header is truncated.");
-    const localName=new TextDecoder().decode(a.slice(local+30,local+30+lnl));
+    if(local+30>file.size)throw new Error("ZIP local file header is malformed.");
+    const localHeader=await read(local,30);
+    if(u32(localHeader,0)!==0x04034b50)throw new Error("ZIP local file header is malformed.");
+    const lnl=u16(localHeader,26),lxl=u16(localHeader,28),start=local+30+lnl+lxl;
+    if(start>file.size)throw new Error("ZIP local file header is truncated.");
+    const localName=new TextDecoder().decode(await read(local+30,lnl));
     if(localName!==name)throw new Error("ZIP local filename mismatch: "+name);
-    if(u16(a,local+8)!==method)throw new Error("ZIP local compression method mismatch: "+name);
-    if(start+comp>a.length)throw new Error("ZIP entry extends beyond the archive.");
-    const compressed=a.slice(start,start+comp);let data;
+    if(u16(localHeader,8)!==method)throw new Error("ZIP local compression method mismatch: "+name);
+    if(start+comp>file.size)throw new Error("ZIP entry extends beyond the archive.");
+    const compressed=await read(start,comp);let data;
     if(method===0)data=compressed;else if(method===8)data=await inflateRaw(compressed,uncomp);else{files.set(name,{name,size:uncomp,method,unsupported:true});continue}
     if(data.length!==uncomp)throw new Error("ZIP entry size check failed: "+name);
     if(crc32(data)!==crc)throw new Error("ZIP CRC check failed: "+name);
     files.set(name,{name,size:data.length,method,data,sha:await sha256(data),crc32:crc.toString(16).padStart(8,"0")})
   }
-  if(p!==cdOff+cdSize)throw new Error("ZIP central directory size does not match its entries.");
+  if(p!==directory.length)throw new Error("ZIP central directory size does not match its entries.");
   files.duplicates=duplicates;return files
 }
 // Kept out of production behavior: the Node regression suite supplies this
