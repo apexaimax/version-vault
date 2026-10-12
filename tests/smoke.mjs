@@ -29,7 +29,7 @@ assert.match(app, /ZIP CRC check failed/);
 assert.match(app, /duplicate filename/);
 assert.match(app, /oldSha/);
 assert.match(app, /newSha/);
-assert.match(app, /VERSIONVAULT RELEASE VERIFICATION REPORT/);
+assert.match(app, /DIFFHARBOR RELEASE VERIFICATION REPORT/);
 
 
 // Analysis cleanup must release both archive maps and invalidate stale results.
