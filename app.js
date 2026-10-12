@@ -40,7 +40,7 @@ async function inflateRaw(buf,maxBytes=MAX_ENTRY_UNCOMPRESSED_BYTES){
       output.set(value,total);total+=value.byteLength;
     }
   }finally{reader.releaseLock()}
-  return output.slice(0,total)
+  return total===maxBytes?output:output.slice(0,total)
 }
 function u64(a,o){const lo=BigInt(u32(a,o)),hi=BigInt(u32(a,o+4));return lo|(hi<<32n)}
 function toSafeNumber(n,label){if(n>BigInt(Number.MAX_SAFE_INTEGER))throw new Error(label+" exceeds browser-safe integer limits.");return Number(n)}
