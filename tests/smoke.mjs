@@ -59,7 +59,8 @@ assert.equal(typeof hooks.parseZip,"function","ZIP parser test hook was not inst
 assert.equal(typeof hooks.inflateRaw,"function","bounded ZIP inflater test hook was not installed");
 const fileFrom=bytes=>({
   size:bytes.byteLength,
-  async arrayBuffer(){return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)}
+  async arrayBuffer(){return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)},
+  slice(start=0,end=bytes.byteLength){const part=bytes.subarray(start,end);return {async arrayBuffer(){return part.buffer.slice(part.byteOffset,part.byteOffset+part.byteLength)}}}
 });
 const parsed=await hooks.parseZip(fileFrom(fixture));
 assert.equal(parsed.size,1,"ZIP64 fixture did not parse to exactly one file");
