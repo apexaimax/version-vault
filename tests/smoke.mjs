@@ -77,6 +77,15 @@ await assert.rejects(
   "Conflicting ZIP filenames must be rejected"
 );
 
+// Regression: local compression method must match the central directory.
+const mismatchedMethod=Buffer.from(fixture);
+mismatchedMethod.writeUInt16LE(8,8); // Local header claims DEFLATE; central entry is STORED.
+await assert.rejects(
+  hooks.parseZip(fileFrom(mismatchedMethod)),
+  /ZIP local compression method mismatch/i,
+  "Conflicting ZIP compression methods must be rejected"
+);
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
