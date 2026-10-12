@@ -33,11 +33,11 @@ assert.match(app, /VERSIONVAULT RELEASE VERIFICATION REPORT/);
 
 
 // Analysis cleanup must release both archive maps and invalidate stale results.
-assert.match(app,/finally\\{state\\.oldFiles=null;state\\.newFiles=null\\}/);
-assert.match(app,/state\\.result=null;try\\{state\\.oldFiles=await parseZip/);
-assert.match(app,/catch\\(e\\)\\{state\\.result=null;\\$\\("#results"\\)\\.hidden=true/);
+assert.match(app,/finally\{state\.oldFiles=null;state\.newFiles=null\}/);
+assert.match(app,/state\.result=null;try\{state\.oldFiles=await parseZip/);
+assert.match(app,/catch\(e\)\{state\.result=null;\$\("#results"\)\.hidden=true/);
 // Bounded archive reads must not regress to reading the complete File.
-assert.doesNotMatch(app,/file\\.arrayBuffer\\(\\)/);
+assert.doesNotMatch(app,/file\.arrayBuffer\(\)/);
 
 const element=()=>({
   addEventListener(){},
