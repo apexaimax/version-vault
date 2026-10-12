@@ -108,6 +108,18 @@ await assert.rejects(
   "Oversized ZIP64 end-of-central-directory records must be rejected"
 );
 
+// Memory boundary: oversized archives must be rejected before arrayBuffer is called.
+let oversizedArchiveRead=false;
+await assert.rejects(
+  hooks.parseZip({
+    size:1024*1024*1024+1,
+    async arrayBuffer(){oversizedArchiveRead=true;throw new Error("oversized archive was read")}
+  }),
+  /Archive exceeds the 1 GiB browser safety limit/,
+  "Oversized archives must be rejected at the file-size boundary"
+);
+assert.equal(oversizedArchiveRead,false,"Oversized ZIP was loaded into memory");
+
 const expandedPayload=Buffer.alloc(1024*1024,65);
 await assert.rejects(
   hooks.inflateRaw(deflateRawSync(expandedPayload),1024),
