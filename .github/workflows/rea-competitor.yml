@@ -1,0 +1,45 @@
+name: REA public competitor analysis
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Node 24 runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+      - name: Record public competitor revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git clone --depth 1 https://github.com/muhammad-saadd/applyai.git target
+          git -C target rev-parse HEAD > evidence/target-commit.txt
+          node -v > evidence/node-version.txt
+          npm -v > evidence/npm-version.txt
+          printf '%s\n' 'rea-agents@6.7.0' > evidence/rea-version-request.txt
+      - name: Execute official REA static JavaScript analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          npx --yes rea-agents@6.7.0 analyze-javascript-application "${GITHUB_WORKSPACE}/target" --json > evidence/rea-applyai.json 2> evidence/rea-stderr.log
+          code=$?
+          set -e
+          echo "$code" > evidence/exit-code.txt
+          if [ "$code" -ne 0 ]; then
+            cat evidence/rea-stderr.log
+            exit "$code"
+          fi
+          node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("evidence/rea-applyai.json","utf8"));console.log("REA JSON keys:", Object.keys(a))'
+      - name: Preserve genuine evidence even when REA fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-applyai-static-evidence
+          path: evidence/
+          retention-days: 1
