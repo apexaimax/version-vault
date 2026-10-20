@@ -1,0 +1,39 @@
+name: REA public ApplyAI one-shot
+on:
+  push:
+    paths:
+      - '.github/workflows/rea-applyai-once.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+      - name: Fetch public ApplyAI and pin commit
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git clone --depth 1 https://github.com/muhammad-saadd/applyai.git target
+          git -C target rev-parse HEAD > evidence/target-commit.txt
+          node --version > evidence/node-version.txt
+          npm --version > evidence/npm-version.txt
+      - name: Run official pinned REA CLI
+        run: |
+          set +e
+          npx --yes rea-agents@6.7.0 analyze-javascript-application "$GITHUB_WORKSPACE/target" --json > evidence/rea.json 2> evidence/stderr.txt
+          code=$?
+          echo "$code" > evidence/exit-code.txt
+          if [ "$code" -ne 0 ]; then cat evidence/stderr.txt; fi
+          exit "$code"
+      - name: Upload execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rea-applyai-evidence
+          path: evidence/
+          retention-days: 1
