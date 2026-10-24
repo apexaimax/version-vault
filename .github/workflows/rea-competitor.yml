@@ -38,7 +38,7 @@ jobs:
           node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("evidence/rea-applyai.json","utf8"));console.log("REA JSON keys:", Object.keys(a))'
       - name: Preserve genuine evidence even when REA fails
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rea-applyai-static-evidence
           path: evidence/
